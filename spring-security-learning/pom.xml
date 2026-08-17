@@ -17,6 +17,8 @@
         <module>module3-jwt-auth</module>
         <module>module4-oauth2</module>
         <module>module5-method-security</module>
+        <module>module6-jwt-oauth2-advanced</module>
+        <module>module7-advanced-security</module>
     </modules>
 
     <parent>

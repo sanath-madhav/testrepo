@@ -14,11 +14,13 @@ A comprehensive multi-module Maven project covering every major concept in Sprin
 6. [Module 3 — JWT Authentication](#6-module-3--jwt-authentication)
 7. [Module 4 — OAuth2 / OpenID Connect](#7-module-4--oauth2--openid-connect)
 8. [Module 5 — Method Security, CORS, Exception Handling](#8-module-5--method-security-cors-exception-handling)
-9. [Security State Diagram](#9-security-state-diagram)
-10. [CSRF Protection](#10-csrf-protection)
-11. [Password Encoding](#11-password-encoding)
-12. [Quick Reference](#12-quick-reference)
-13. [Running Each Module](#13-running-each-module)
+9. [Module 6 — JWT Signing Algorithms, Refresh Tokens, OAuth2 Grant Types](#9-module-6--jwt-signing-algorithms-refresh-tokens-oauth2-grant-types)
+10. [Module 7 — Advanced Security: Brute Force, Role Hierarchy, Security Headers, Audit](#10-module-7--advanced-security)
+11. [Security State Diagram](#11-security-state-diagram)
+12. [CSRF Protection](#12-csrf-protection)
+13. [Password Encoding](#13-password-encoding)
+14. [Quick Reference](#14-quick-reference)
+15. [Running Each Module](#15-running-each-module)
 
 ---
 
@@ -1131,10 +1133,73 @@ curl -u user:pass http://localhost:8085/api/documents
 curl -u user:pass http://localhost:8085/api/documents/my
 ```
 
+### Module 6 — JWT Signing, Refresh Tokens, OAuth2 Grant Types
+```bash
+cd module6-jwt-oauth2-advanced
+mvn spring-boot:run
+# Swagger: http://localhost:8086/swagger-ui.html
+
+# Login to get tokens:
+curl -s -X POST http://localhost:8086/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"pass123"}' | jq .
+
+# View JWT signing algorithm demos:
+curl http://localhost:8086/api/jwt-demo/hs256 | jq .
+curl http://localhost:8086/api/jwt-demo/rs256 | jq .
+curl http://localhost:8086/api/jwt-demo/es256 | jq .
+
+# JWKS endpoint:
+curl http://localhost:8086/api/jwt-demo/.well-known/jwks.json | jq .
+
+# OAuth2 grant type guides (no auth needed):
+curl http://localhost:8086/api/oauth2-guide/authorization-code-pkce | jq .
+curl http://localhost:8086/api/oauth2-guide/client-credentials | jq .
+curl http://localhost:8086/api/oauth2-guide/device-code | jq .
+curl http://localhost:8086/api/oauth2-guide/deprecated-grants | jq .
+```
+
+### Module 7 — Advanced Security
+```bash
+cd module7-advanced-security
+mvn spring-boot:run
+# Swagger: http://localhost:8087/swagger-ui.html
+
+# Login (with brute force protection):
+curl -s -X POST http://localhost:8087/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"Alice@1234"}' | jq .
+
+# Store the token:
+TOKEN=$(curl -s -X POST http://localhost:8087/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"Admin@1234"}' | jq -r .token)
+
+# @AuthenticationPrincipal demo:
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8087/api/me | jq .
+
+# Role hierarchy: admin can access manager endpoint:
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8087/api/manager/dashboard | jq .
+
+# Password policy check (no auth needed):
+curl -s -X POST http://localhost:8087/api/public/password-check \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"weak","username":"alice"}' | jq .
+
+# Security concept guides:
+curl http://localhost:8087/api/public/concepts/role-hierarchy | jq .
+curl http://localhost:8087/api/public/concepts/security-headers | jq .
+curl http://localhost:8087/api/public/concepts/brute-force-protection | jq .
+curl http://localhost:8087/api/public/concepts/acl | jq .
+
+# Audit log (ADMIN only):
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8087/api/audit/recent | jq .
+```
+
 ### Run All Tests
 ```bash
-# From parent directory
-mvn test
+# From parent directory (skips OAuth2 module which needs a real provider):
+mvn test -pl !module4-oauth2
 ```
 
 ### Build All Modules
@@ -1173,9 +1238,437 @@ spring-security-learning/
 │   ├── config/OAuth2SecurityConfig.java
 │   └── service/CustomOAuth2UserService.java
 │
-└── module5-method-security/         ← @PreAuthorize, CORS, Exceptions
-    ├── service/DocumentService.java
-    ├── service/DocumentPermissionEvaluator.java
-    ├── config/MethodSecurityConfig.java
-    └── exception/SecurityExceptionHandler.java
+├── module5-method-security/         ← @PreAuthorize, CORS, Exceptions
+│   ├── service/DocumentService.java
+│   ├── service/DocumentPermissionEvaluator.java
+│   ├── config/MethodSecurityConfig.java
+│   └── exception/SecurityExceptionHandler.java
+│
+├── module6-jwt-oauth2-advanced/     ← JWT signing, Refresh tokens, OAuth2 grant types
+│   ├── util/{AccessTokenUtil,JwtSigningUtil}.java
+│   ├── service/RefreshTokenService.java       ← rotation + theft detection
+│   ├── entity/RefreshToken.java
+│   ├── controller/{TokenController,JwtSigningDemoController,OAuth2GrantTypesController}.java
+│   └── filter/JwtAuthFilter.java
+│
+└── module7-advanced-security/       ← Brute force, role hierarchy, security headers, audit
+    ├── provider/CustomAuthenticationProvider.java
+    ├── service/{BruteForceProtectionService,AuditService,PasswordPolicyService}.java
+    ├── event/SecurityEventListener.java
+    ├── entity/{User,AuditEvent}.java
+    ├── config/{SecurityConfig,PasswordEncoderConfig,DataInitializer}.java
+    └── controller/{AuthController,UserController,AuditController,SecurityConceptsController}.java
 ```
+
+---
+
+## 9. Module 6 — JWT Signing Algorithms, Refresh Tokens, OAuth2 Grant Types
+
+**Port:** 8086 | **Entry:** `module6-jwt-oauth2-advanced`
+
+### 9.1 JWT Signing Algorithms
+
+JWTs must be signed to prevent tampering. Spring Security (via jjwt) supports three algorithms:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    JWT SIGNING ALGORITHM COMPARISON                              │
+│                                                                                  │
+│  HS256 (HMAC-SHA256) — Symmetric                                                │
+│  ┌─────────────────┐                                                            │
+│  │   Auth Server   │ ──── shared secret ────▶ │ Resource Server │              │
+│  └─────────────────┘                           └─────────────────┘              │
+│  • One key to manage                                                             │
+│  • All verifiers must share the secret — risk if any service is compromised     │
+│  • Use when: single service, tightly controlled microservices                   │
+│                                                                                  │
+│  RS256 (RSA-SHA256) — Asymmetric                                                │
+│  ┌─────────────────┐                                                            │
+│  │   Auth Server   │ ──── private key ────▶  sign JWT                          │
+│  │  (private key)  │                                                            │
+│  └─────────────────┘                                                            │
+│         │                                                                        │
+│         ▼ /.well-known/jwks.json (public key)                                  │
+│  ┌─────────────────┐                                                            │
+│  │ Resource Servers│ ──── public key ────▶   verify JWT                        │
+│  └─────────────────┘                                                            │
+│  • Private key never leaves auth server                                         │
+│  • Resource servers only need public key (safe to distribute)                   │
+│  • Key rotation: add new pair to JWKS, old tokens still verify                  │
+│  • Use when: multi-service / microservices                                       │
+│                                                                                  │
+│  ES256 (ECDSA P-256) — Asymmetric                                               │
+│  Same asymmetric benefits as RS256 but:                                          │
+│  • 256-bit EC key ≈ 3072-bit RSA security                                       │
+│  • 64-byte signature vs 256-byte for RSA-2048                                   │
+│  • Faster signing/verification                                                   │
+│  • Use when: mobile, IoT, token-size sensitive, FIPS compliance                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Live Endpoints:**
+| Endpoint | Description |
+|---|---|
+| `GET /api/jwt-demo/hs256` | Generate HS256 token + security notes |
+| `GET /api/jwt-demo/rs256` | Generate RS256 token + public JWK |
+| `GET /api/jwt-demo/es256` | Generate ES256 token + EC public JWK |
+| `GET /api/jwt-demo/.well-known/jwks.json` | JWK Set (both RSA + EC public keys) |
+| `GET /api/jwt-demo/verify/rs256?token=...` | Verify an RS256 token |
+| `GET /api/jwt-demo/comparison` | Algorithm comparison table |
+
+### 9.2 JWK Set and Key Rotation
+
+```
+Key Rotation Flow (RS256/ES256):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Step 1: Normal operation
+  Auth Server signs JWT with key-id="rsa-key-1"
+  JWKS: { keys: [{ kid: "rsa-key-1", ... }] }
+
+Step 2: Generate new key pair
+  JWKS: { keys: [{ kid: "rsa-key-1", ... }, { kid: "rsa-key-2", ... }] }
+         ↑ old key still here (old tokens still validate)
+
+Step 3: Start signing new tokens with rsa-key-2
+  JWT header: { alg: "RS256", kid: "rsa-key-2" }
+  Resource servers fetch JWKS → verify with correct key by kid
+
+Step 4: Remove old key after expiry window
+  JWKS: { keys: [{ kid: "rsa-key-2", ... }] }
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### 9.3 Refresh Token Rotation with Theft Detection
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│              REFRESH TOKEN LIFECYCLE                                 │
+│                                                                      │
+│  1. LOGIN                                                            │
+│     → ACCESS token  (15 min, JWT, stateless)                        │
+│     → REFRESH token (7 days, opaque random bytes, stored in DB)     │
+│     → family_id = UUID (groups all tokens for this session)         │
+│                                                                      │
+│  2. ACCESS TOKEN EXPIRES                                             │
+│     POST /auth/refresh { refreshToken }                             │
+│       a. Look up in DB                                               │
+│       b. Verify: not expired, not revoked                           │
+│       c. Issue NEW access token                                      │
+│       d. Issue NEW refresh token (same family_id)                   │
+│       e. Mark OLD refresh token as REVOKED ← ROTATION               │
+│                                                                      │
+│  3. THEFT DETECTION                                                  │
+│     If a revoked refresh token is presented again:                   │
+│       → Someone is reusing an old token                             │
+│       → REVOKE the ENTIRE family → force re-login on all devices    │
+│       → Legitimate user and attacker both need to re-authenticate   │
+│                                                                      │
+│  4. LOGOUT                                                           │
+│     POST /auth/logout → revoke entire family                         │
+│     POST /auth/logout-all → revoke ALL families for user            │
+└─────────────────────────────────────────────────────────────────────┘
+
+Why opaque refresh tokens (not JWT)?
+  JWT: cannot be revoked without a blacklist (token is self-contained)
+  Opaque: just flip a DB flag → instantly invalid
+```
+
+**Sequence Diagram — Refresh Token Rotation:**
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as Auth API
+    participant DB as RefreshToken DB
+
+    Client->>API: POST /auth/login {username, password}
+    API->>DB: Save RefreshToken(token, familyId, username)
+    API-->>Client: {accessToken, refreshToken}
+
+    Note over Client: access token expires after 15 min
+
+    Client->>API: POST /auth/refresh {refreshToken: "old-token"}
+    API->>DB: findByToken("old-token")
+    DB-->>API: RefreshToken (valid, not revoked)
+    API->>DB: mark old token as revoked
+    API->>DB: save new RefreshToken (same familyId)
+    API-->>Client: {accessToken: new, refreshToken: new}
+
+    Note over Client: Attacker steals old-token
+
+    Client->>API: POST /auth/refresh {refreshToken: "old-token"}
+    API->>DB: findByToken("old-token")
+    DB-->>API: RefreshToken (REVOKED!)
+    API->>DB: revokeAllByFamilyId() ← theft detected
+    API-->>Client: 401 Refresh token reuse detected
+```
+
+### 9.4 OAuth2 Grant Types
+
+```
+OAUTH2 GRANT TYPE DECISION TREE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Is there a USER involved?
+  YES ──┬── Web/Mobile app? → Authorization Code + PKCE (RFC 7636)
+        │                     Required for public clients (SPA, mobile)
+        │                     PKCE prevents auth code interception
+        │
+        └── Device without browser? → Device Authorization Grant (RFC 8628)
+                                       TV, CLI, IoT: user approves on phone
+
+  NO  → Client Credentials
+        Machine-to-machine, no user
+        Microservices, cron jobs, background workers
+
+REFRESH TOKEN (not standalone — used after any user-involved flow)
+  Rotate refresh tokens to detect theft
+
+DEPRECATED (do not use):
+  Implicit Grant → removed in OAuth 2.1 (token in URL fragment = exposed)
+  ROPC (Resource Owner Password) → removed in OAuth 2.1 (client handles passwords)
+
+OAuth 2.1 changes:
+  • PKCE required for ALL public clients
+  • Exact redirect URI matching (no wildcards)
+  • Refresh token rotation required
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+**Live Endpoints:**
+| Endpoint | Description |
+|---|---|
+| `POST /auth/login` | Login: returns access + refresh tokens |
+| `POST /auth/refresh` | Rotate refresh token |
+| `POST /auth/logout` | Revoke token family |
+| `POST /auth/logout-all` | Revoke all sessions |
+| `GET /api/oauth2-guide/authorization-code-pkce` | PKCE flow guide |
+| `GET /api/oauth2-guide/client-credentials` | M2M guide |
+| `GET /api/oauth2-guide/device-code` | Device flow guide |
+| `GET /api/oauth2-guide/deprecated-grants` | Why implicit/ROPC removed |
+| `GET /api/oauth2-guide/all-grants-summary` | Quick reference |
+
+---
+
+## 10. Module 7 — Advanced Security
+
+**Port:** 8087 | **Entry:** `module7-advanced-security`
+
+### 10.1 Custom AuthenticationProvider
+
+```
+ProviderManager (implements AuthenticationManager)
+  │
+  ├── CustomAuthenticationProvider  ← our custom provider
+  │     ├── supports(UsernamePasswordAuthenticationToken.class) → true
+  │     ├── loadUserByUsername(username)
+  │     ├── passwordEncoder.matches(raw, encoded)
+  │     └── bruteForceProtectionService.recordFailedAttempt / recordSuccess
+  │
+  └── (other providers can be chained in sequence)
+
+Why extend AuthenticationProvider?
+  • Add business rules before/after authentication
+  • Integrate with external identity sources (LDAP, Active Directory)
+  • Support custom token types (OTP, API key, certificate)
+  • Wrap standard auth with additional checks (brute force, MFA, IP whitelist)
+```
+
+### 10.2 Brute Force Protection
+
+```
+ACCOUNT LOCKOUT FLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Login attempt
+      │
+      ▼
+  Is account locked?  (check lockoutTime vs now)
+      │ YES → 423 Locked (auto-unlocks when lockoutTime expires)
+      │ NO  ↓
+      ▼
+  Load UserDetails
+      │ Not found → record failure, throw BadCredentialsException
+      ▼
+  Verify password
+      │ Wrong → increment failedLoginAttempts
+      │           if attempts >= MAX: lock account, set lockoutTime
+      │         throw BadCredentialsException
+      │ Correct ↓
+      ▼
+  Reset failedLoginAttempts = 0
+  Authentication success → return JWT
+
+Configuration (application.properties):
+  security.max-login-attempts=5
+  security.lockout-duration-minutes=15
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### 10.3 Role Hierarchy
+
+```
+ROLE_ADMIN > ROLE_MANAGER > ROLE_USER
+
+This means:
+  hasRole("USER")    → true for USER,    MANAGER, ADMIN
+  hasRole("MANAGER") → true for MANAGER, ADMIN
+  hasRole("ADMIN")   → true for ADMIN only
+
+Without hierarchy: hasAnyRole("USER","MANAGER","ADMIN") needed at every USER check
+With hierarchy:    hasRole("USER") is sufficient everywhere
+
+Configuration:
+  @Bean
+  public RoleHierarchy roleHierarchy() {
+      RoleHierarchyImpl h = new RoleHierarchyImpl();
+      h.setHierarchy("ROLE_ADMIN > ROLE_MANAGER\nROLE_MANAGER > ROLE_USER");
+      return h;
+  }
+
+  // For @PreAuthorize to use it — explicit in Spring Boot 3.2 / Security 6.2:
+  @Bean
+  public MethodSecurityExpressionHandler methodSecurityExpressionHandler(RoleHierarchy h) {
+      DefaultMethodSecurityExpressionHandler handler = new DefaultMethodSecurityExpressionHandler();
+      handler.setRoleHierarchy(h);
+      return handler;
+  }
+```
+
+### 10.4 Security Headers
+
+```
+Header                          Value                                  Protects Against
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HSTS                            max-age=31536000; includeSubDomains    SSL stripping, MITM
+Content-Security-Policy         default-src 'self'                     XSS, data injection
+X-Frame-Options                 DENY                                   Clickjacking
+X-Content-Type-Options          nosniff                                MIME sniffing
+Referrer-Policy                 strict-origin-when-cross-origin        Referrer leakage
+Permissions-Policy              camera=(), microphone=()               Feature abuse
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Spring Security Configuration:
+  http.headers(h -> h
+      .httpStrictTransportSecurity(hsts -> hsts.maxAgeInSeconds(31536000).includeSubDomains(true))
+      .frameOptions(f -> f.deny())
+      .contentTypeOptions(c -> {})
+      .referrerPolicy(r -> r.policy(STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+      .permissionsPolicy(p -> p.policy("camera=(), microphone=()"))
+  )
+```
+
+### 10.5 Security Events and Audit Logging
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Provider as CustomAuthenticationProvider
+    participant Events as ApplicationEventPublisher
+    participant Listener as SecurityEventListener
+    participant Audit as AuditService
+    participant DB as AuditEvent DB
+
+    Client->>Provider: authenticate(username, password)
+    alt success
+        Provider->>Events: publish AuthenticationSuccessEvent
+        Events->>Listener: onSuccess()
+        Listener->>Audit: log("LOGIN_SUCCESS", username)
+        Audit->>DB: save AuditEvent
+    else bad credentials
+        Provider->>Events: publish AuthenticationFailureBadCredentialsEvent
+        Events->>Listener: onBadCredentials()
+        Listener->>Audit: log("LOGIN_FAILURE", username)
+        Audit->>DB: save AuditEvent
+    else locked
+        Provider->>Events: publish AuthenticationFailureLockedEvent
+        Events->>Listener: onLocked()
+        Listener->>Audit: log("ACCOUNT_LOCKED_LOGIN_ATTEMPT", username)
+        Audit->>DB: save AuditEvent
+    end
+```
+
+**Key Spring Security events:**
+| Event | When fired |
+|---|---|
+| `AuthenticationSuccessEvent` | Login succeeded |
+| `AuthenticationFailureBadCredentialsEvent` | Wrong password / unknown user |
+| `AuthenticationFailureLockedEvent` | Account is locked |
+| `AuthenticationFailureDisabledEvent` | Account is disabled |
+| `AuthenticationFailureExpiredEvent` | Credentials/account expired |
+
+### 10.6 @AuthenticationPrincipal
+
+```java
+// Old way — verbose, couples to security infrastructure:
+Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+UserDetails user = (UserDetails) auth.getPrincipal();
+
+// New way — clean, declarative, works with @WithMockUser in tests:
+@GetMapping("/api/me")
+public ResponseEntity<?> profile(@AuthenticationPrincipal UserDetails currentUser) {
+    return ResponseEntity.ok(Map.of("username", currentUser.getUsername()));
+}
+
+// Custom UserDetails:
+@GetMapping("/api/me")
+public ResponseEntity<?> profile(@AuthenticationPrincipal CustomUser user) {
+    return ResponseEntity.ok(user.getFullName()); // cast to your type
+}
+
+// SpEL for anonymous-safe access:
+public ResponseEntity<?> data(@AuthenticationPrincipal(
+    expression = "#this == 'anonymousUser' ? null : principal") UserDetails user) {
+```
+
+### 10.7 Password Policy
+
+The `PasswordPolicyService` enforces NIST SP 800-63B guidelines:
+- Minimum 8 characters (up to 72 for bcrypt)
+- At least one uppercase, lowercase, digit, special character
+- Cannot contain username
+- Cannot be a common password (top 15 checked)
+- No three sequential identical or ascending/descending characters
+- Strength score (0–5)
+
+**Endpoint:** `POST /api/public/password-check` — public, no auth required.
+
+### 10.8 ACL (Access Control Lists) — Conceptual Guide
+
+ACL provides **domain object security** — per-object, per-user permissions beyond RBAC:
+
+```
+RBAC (Role-Based):        hasRole("ADMIN") → can access ALL documents
+ACL (Object-Based):       Alice can READ document 123
+                          Bob can READ + WRITE document 123
+                          Carol is OWNER of document 123 (READ + WRITE + DELETE)
+
+Spring Security ACL tables:
+  acl_class          — maps Java class to numeric ID
+  acl_sid            — maps principal/role to numeric ID
+  acl_object_identity — maps each object instance to class + object ID
+  acl_entry          — the permission entries (who, what object, what permission)
+
+Usage:
+  @PreAuthorize("hasPermission(#doc, 'READ')")
+  public Document getDocument(Document doc) { ... }
+```
+
+See `GET /api/public/concepts/acl` for a full implementation guide.
+
+**Live Endpoints (Module 7):**
+| Endpoint | Auth Required | Description |
+|---|---|---|
+| `POST /auth/login` | None | Login with brute force protection |
+| `GET /api/me` | Any | @AuthenticationPrincipal demo |
+| `GET /api/user/data` | USER+ | Role hierarchy: USER/MANAGER/ADMIN |
+| `GET /api/manager/dashboard` | MANAGER+ | Role hierarchy: MANAGER/ADMIN |
+| `GET /api/admin/dashboard` | ADMIN | Admin only |
+| `GET /api/audit/recent` | ADMIN | Security audit log |
+| `POST /api/public/password-check` | None | Password policy check |
+| `GET /api/public/concepts/role-hierarchy` | None | Role hierarchy guide |
+| `GET /api/public/concepts/security-headers` | None | Security headers guide |
+| `GET /api/public/concepts/brute-force-protection` | None | Brute force strategies |
+| `GET /api/public/concepts/acl` | None | ACL implementation guide |
+| `GET /api/public/concepts/session-management` | None | Session management guide |
+| `GET /api/public/concepts/authentication-principal` | None | @AuthenticationPrincipal guide |
