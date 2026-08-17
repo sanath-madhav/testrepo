@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head>
+    <title>Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+        .card { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 1.5rem; margin: 1rem 0; }
+        .badge { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; }
+        .badge-primary { background: #007bff; color: white; }
+        .badge-danger { background: #dc3545; color: white; }
+        nav { background: #343a40; padding: 1rem; border-radius: 8px; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; }
+        nav a { color: white; text-decoration: none; margin-right: 1rem; }
+        .btn { padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer; }
+        .btn-danger { background: #dc3545; color: white; }
+    </style>
+</head>
+<body>
+<nav>
+    <div>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/admin" sec:authorize="hasRole('ADMIN')">Admin</a>
+        <a href="/manager" sec:authorize="hasAnyRole('ADMIN','MANAGER')">Manager</a>
+    </div>
+    <div>
+        <span style="color: white;" th:text="'Logged in as: ' + ${username}"></span>
+        <form th:action="@{/logout}" method="post" style="display:inline;">
+            <button class="btn btn-danger" type="submit">Logout</button>
+        </form>
+    </div>
+</nav>
+
+<div class="card">
+    <h2>Welcome to Dashboard</h2>
+    <p>Username: <strong th:text="${username}"></strong></p>
+    <p>Roles:
+        <span th:each="role : ${roles}">
+            <span class="badge badge-primary" th:text="${role}"></span>
+        </span>
+    </p>
+</div>
+
+<!-- Thymeleaf Spring Security tag: sec:authorize -->
+<div class="card" sec:authorize="hasRole('ADMIN')">
+    <h3>Admin Section (ROLE_ADMIN only)</h3>
+    <p>This section is only visible to admins using <code>sec:authorize="hasRole('ADMIN')"</code></p>
+</div>
+
+<div class="card" sec:authorize="hasAnyRole('ADMIN','MANAGER')">
+    <h3>Manager Section (ROLE_ADMIN or ROLE_MANAGER)</h3>
+    <p>Visible to admins and managers using <code>sec:authorize="hasAnyRole('ADMIN','MANAGER')"</code></p>
+</div>
+
+<div class="card" sec:authorize="isAuthenticated()">
+    <h3>Authenticated User Section</h3>
+    <p>Visible to all authenticated users.</p>
+    <p>Current authentication: <code sec:authentication="name"></code></p>
+</div>
+</body>
+</html>

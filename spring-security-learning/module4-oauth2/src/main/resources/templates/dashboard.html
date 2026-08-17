@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head><title>OAuth2 Dashboard</title></head>
+<body>
+<h1>OAuth2 Dashboard</h1>
+<div sec:authorize="isAuthenticated()">
+    <img th:if="${picture}" th:src="${picture}" width="64" style="border-radius:50%"/>
+    <p>Name: <strong th:text="${name}"></strong></p>
+    <p>Email: <strong th:text="${email}"></strong></p>
+    <p>Authorities: <span th:text="${authorities}"></span></p>
+    <h3>All Provider Attributes:</h3>
+    <pre th:text="${attributes}"></pre>
+    <form th:action="@{/logout}" method="post">
+        <button type="submit">Logout</button>
+    </form>
+</div>
+</body>
+</html>
