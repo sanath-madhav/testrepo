@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Login - OAuth2</title>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f2f5; }
+        .login-box { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); width: 360px; text-align: center; }
+        .oauth-btn { display: block; width: 100%; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px; border: none; cursor: pointer; font-size: 1rem; text-decoration: none; }
+        .google-btn { background: #4285f4; color: white; }
+        .github-btn { background: #333; color: white; }
+    </style>
+</head>
+<body>
+<div class="login-box">
+    <h2>Login with OAuth2</h2>
+    <p>Use your social account to login</p>
+    <a href="/oauth2/authorization/google" class="oauth-btn google-btn">Login with Google</a>
+    <a href="/oauth2/authorization/github" class="oauth-btn github-btn">Login with GitHub</a>
+    <hr/>
+    <small>Configure client-id and client-secret in application.properties</small>
+</div>
+</body>
+</html>
